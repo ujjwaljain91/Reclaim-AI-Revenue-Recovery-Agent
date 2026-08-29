@@ -28,7 +28,7 @@ import { formatINR, formatINRFull, formatTimeAgo, formatPaymentRef } from '@/lib
 export default function CaseDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
   const router = useRouter();
-  const { cases, executeStepOnCase, guardrails } = useReclaim();
+  const { cases, executeStepOnCase, guardrails, openAskReclaim } = useReclaim();
   const [isExecuting, setIsExecuting] = useState(false);
 
   const currentCase = cases.find((c) => c.id === resolvedParams.id) || cases[0];
@@ -114,26 +114,37 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
           </div>
         </div>
 
-        {/* Action button in header if at risk */}
-        {currentCase.status === 'at_risk' && (
+        {/* Header Action Buttons */}
+        <div className="flex items-center gap-2.5 self-start md:self-center shrink-0">
           <button
-            onClick={handleStepExecution}
-            disabled={isExecuting}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white rounded-md text-xs font-bold transition-all shadow-xs"
+            onClick={() => openAskReclaim({ caseId: currentCase.id })}
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-white hover:bg-neutral-50 text-neutral-800 border border-neutral-300 rounded-md text-xs font-bold transition-all shadow-2xs hover:shadow-xs cursor-pointer"
+            title={`Ask Reclaim about ${customer.company}`}
           >
-            {isExecuting ? (
-              <>
-                <div className="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" />
-                <span>Executing Agent Action...</span>
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>✦ Let Reclaim decide</span>
-              </>
-            )}
+            <Sparkles className="w-3.5 h-3.5 text-brand-600" />
+            <span>✦ Ask Reclaim</span>
           </button>
-        )}
+
+          {currentCase.status === 'at_risk' && (
+            <button
+              onClick={handleStepExecution}
+              disabled={isExecuting}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white rounded-md text-xs font-bold transition-all shadow-xs cursor-pointer"
+            >
+              {isExecuting ? (
+                <>
+                  <div className="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                  <span>Executing Agent Action...</span>
+                </>
+              ) : (
+                <>
+                  <Bot className="w-3.5 h-3.5" />
+                  <span>Let Reclaim Decide</span>
+                </>
+              )}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Reclaim's Assessment Metrics Bar */}

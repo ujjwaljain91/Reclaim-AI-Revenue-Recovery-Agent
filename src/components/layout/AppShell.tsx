@@ -8,6 +8,8 @@ import { MobileNav } from './MobileNav';
 import { BatchProcessorModal } from '../reclaim/BatchProcessorModal';
 import { PaymentSimulatorModal } from '../reclaim/PaymentSimulatorModal';
 import { ToastContainer } from '../reclaim/ToastContainer';
+import { AskReclaimDrawer } from '../reclaim/AskReclaimDrawer';
+import { useReclaim } from '@/context/ReclaimContext';
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -15,6 +17,7 @@ interface AppShellProps {
 
 export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const pathname = usePathname();
+  const { isAskReclaimOpen, closeAskReclaim, askReclaimCaseId } = useReclaim();
   const isLandingPage = pathname === '/';
   const isAuthPage = pathname.startsWith('/auth');
   const isOnboardingPage = pathname.startsWith('/onboarding');
@@ -43,6 +46,12 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
         <PaymentSimulatorModal
           isOpen={isPaymentSimOpen}
           onClose={() => setIsPaymentSimOpen(false)}
+        />
+
+        <AskReclaimDrawer
+          isOpen={isAskReclaimOpen}
+          onClose={closeAskReclaim}
+          initialCaseId={askReclaimCaseId}
         />
 
         <ToastContainer />
@@ -90,6 +99,12 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
       <PaymentSimulatorModal
         isOpen={isPaymentSimOpen}
         onClose={() => setIsPaymentSimOpen(false)}
+      />
+
+      <AskReclaimDrawer
+        isOpen={isAskReclaimOpen}
+        onClose={closeAskReclaim}
+        initialCaseId={askReclaimCaseId}
       />
 
       <ToastContainer />

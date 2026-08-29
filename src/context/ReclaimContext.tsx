@@ -31,6 +31,11 @@ interface ReclaimContextType {
   activeFilter: string;
   searchQuery: string;
   toasts: ToastInfo[];
+  isAskReclaimOpen: boolean;
+  askReclaimCaseId?: string;
+  openAskReclaim: (context?: { caseId?: string }) => void;
+  closeAskReclaim: () => void;
+  toggleAskReclaim: () => void;
   setActiveFilter: (filter: string) => void;
   setSearchQuery: (query: string) => void;
   updateGuardrails: (newGuardrails: Partial<Guardrails>) => void;
@@ -52,6 +57,23 @@ export function ReclaimProvider({ children }: { children: React.ReactNode }) {
   const [activeFilter, setActiveFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [toasts, setToasts] = useState<ToastInfo[]>([]);
+  const [isAskReclaimOpen, setIsAskReclaimOpen] = useState(false);
+  const [askReclaimCaseId, setAskReclaimCaseId] = useState<string | undefined>(undefined);
+
+  const openAskReclaim = (context?: { caseId?: string }) => {
+    if (context?.caseId) {
+      setAskReclaimCaseId(context.caseId);
+    }
+    setIsAskReclaimOpen(true);
+  };
+
+  const closeAskReclaim = () => {
+    setIsAskReclaimOpen(false);
+  };
+
+  const toggleAskReclaim = () => {
+    setIsAskReclaimOpen((prev) => !prev);
+  };
   const [batchProgress, setBatchProgress] = useState<BatchProcessingProgress>({
     isRunning: false,
     stage: 'idle',
@@ -399,6 +421,11 @@ export function ReclaimProvider({ children }: { children: React.ReactNode }) {
         activeFilter,
         searchQuery,
         toasts,
+        isAskReclaimOpen,
+        askReclaimCaseId,
+        openAskReclaim,
+        closeAskReclaim,
+        toggleAskReclaim,
         setActiveFilter,
         setSearchQuery,
         updateGuardrails,

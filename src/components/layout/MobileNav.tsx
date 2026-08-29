@@ -35,7 +35,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
 }) => {
   const pathname = usePathname();
   const router = useRouter();
-  const { kpis, addToast } = useReclaim();
+  const { kpis, addToast, openAskReclaim } = useReclaim();
 
   const handleLogout = () => {
     onClose();
@@ -119,6 +119,30 @@ export const MobileNav: React.FC<MobileNavProps> = ({
             })}
           </div>
 
+          <div className="p-3 bg-brand-50 border border-brand-200 rounded-xl space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-brand-900 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-brand-600" />
+                Ask Reclaim ✦
+              </span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded bg-brand-200/60 text-brand-800 font-bold uppercase">
+                Copilot
+              </span>
+            </div>
+            <p className="text-[11px] text-brand-700 leading-snug">
+              Ask about revenue at risk, timing, or agent decisions.
+            </p>
+            <button
+              onClick={() => {
+                onClose();
+                openAskReclaim();
+              }}
+              className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-brand-500 hover:bg-brand-600 active:bg-brand-700 text-white rounded-lg text-xs font-bold shadow-2xs min-h-[40px] cursor-pointer"
+            >
+              <span>✦ Open Copilot</span>
+            </button>
+          </div>
+
           <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-lg space-y-2">
             <span className="text-xs font-semibold text-neutral-700 block">Buildathon Simulation</span>
             <button
@@ -126,7 +150,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
                 onClose();
                 onOpenBatchSim?.();
               }}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-brand-500 text-white rounded text-xs font-semibold shadow-xs min-h-[44px]"
+              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-white rounded-lg text-xs font-semibold shadow-xs min-h-[44px]"
             >
               <Sparkles className="w-4 h-4" />
               Run 100-Case Batch

@@ -33,7 +33,7 @@ export const TopBar: React.FC<TopBarProps> = ({
 }) => {
   const pathname = usePathname();
   const router = useRouter();
-  const { agentState, searchQuery, setSearchQuery, addToast } = useReclaim();
+  const { agentState, searchQuery, setSearchQuery, addToast, openAskReclaim } = useReclaim();
   const { user, signOut } = useAuth();
   const [showNotifications, setShowNotifications] = useState(false);
 
@@ -163,6 +163,17 @@ export const TopBar: React.FC<TopBarProps> = ({
         >
           <Sparkles className="w-3.5 h-3.5" />
           <span>Batch Demo</span>
+        </button>
+
+        {/* Ask Reclaim ✦ Trigger Button */}
+        <button
+          onClick={() => openAskReclaim()}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-50 hover:bg-brand-100/90 text-brand-700 border border-brand-200 text-xs font-bold transition-all shadow-2xs hover:shadow-xs group cursor-pointer"
+          title="Ask Reclaim ✦ — Revenue Intelligence Copilot"
+        >
+          <Sparkles className="w-3.5 h-3.5 text-brand-600 group-hover:rotate-12 transition-transform" />
+          <span>Ask Reclaim</span>
+          <span className="text-brand-600 font-extrabold text-[12px]">✦</span>
         </button>
 
         {/* Notifications Bell */}

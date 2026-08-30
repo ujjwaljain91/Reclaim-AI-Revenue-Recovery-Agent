@@ -366,13 +366,23 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
 
             <div className="flex items-center gap-2 flex-wrap">
               {!promiseToPay && !isRecovered && (
-                <button
-                  onClick={() => requestPaymentCommitment(currentCase.id)}
-                  className="px-3.5 py-2 bg-brand-500 hover:bg-brand-600 text-white rounded-md text-xs font-bold transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Request Payment Commitment (Simulate)</span>
-                </button>
+                <>
+                  <button
+                    onClick={() => requestPaymentCommitment(currentCase.id)}
+                    className="px-3.5 py-2 bg-brand-500 hover:bg-brand-600 text-white rounded-md text-xs font-bold transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Request Commitment (Simulate)</span>
+                  </button>
+
+                  <button
+                    onClick={() => setShowPromiseModal(true)}
+                    className="px-3 py-2 bg-white hover:bg-neutral-100 text-neutral-800 border border-neutral-300 rounded-md text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1"
+                  >
+                    <Calendar className="w-3.5 h-3.5 text-neutral-500" />
+                    <span>Setup Custom Promise</span>
+                  </button>
+                </>
               )}
 
               {promiseToPay && !isRecovered && (
@@ -383,7 +393,7 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                     className="px-3.5 py-2 bg-success-600 hover:bg-success-700 text-white rounded-md text-xs font-bold transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
                   >
                     <Check className="w-3.5 h-3.5" />
-                    <span>Verify Settlement (Payment Received)</span>
+                    <span>Verify Settlement (Received)</span>
                   </button>
 
                   <button
@@ -391,7 +401,14 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
                     disabled={isVerifyingPromise}
                     className="px-3 py-2 bg-neutral-100 hover:bg-danger-50 hover:text-danger-700 text-neutral-700 border border-neutral-300 rounded-md text-xs font-semibold transition-colors cursor-pointer"
                   >
-                    <span>Simulate Broken Promise (Overdue)</span>
+                    <span>Simulate Broken Promise</span>
+                  </button>
+
+                  <button
+                    onClick={() => setShowPromiseModal(true)}
+                    className="px-2.5 py-2 text-neutral-500 hover:text-neutral-800 text-xs font-medium underline transition-colors cursor-pointer"
+                  >
+                    Edit Promise
                   </button>
                 </>
               )}

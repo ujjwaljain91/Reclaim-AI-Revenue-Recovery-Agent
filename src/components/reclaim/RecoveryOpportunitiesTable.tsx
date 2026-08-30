@@ -187,9 +187,16 @@ export const RecoveryOpportunitiesTable: React.FC<RecoveryOpportunitiesTableProp
                     {c.decision?.recommendedAction || c.recommendedAction}
                   </td>
 
-                  {/* Status */}
+                  {/* Status & Promise-to-Pay */}
                   <td className="py-3.5 px-4 whitespace-nowrap">
-                    {getStatusBadge(c.status)}
+                    <div className="space-y-1">
+                      {getStatusBadge(c.status)}
+                      {c.revenueType === 'receivable' && c.receivableDetails?.promiseToPay && (
+                        <span className="block text-[10px] font-semibold text-warning-800 bg-warning-50 px-1.5 py-0.5 rounded border border-warning-200 w-fit">
+                          Promised · {new Date(c.receivableDetails.promiseToPay.promisedDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+                        </span>
+                      )}
+                    </div>
                   </td>
 
                   {/* Action CTA */}

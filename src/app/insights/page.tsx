@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import {
   BarChart3,
   TrendingUp,
@@ -418,31 +419,98 @@ export default function InsightsPage() {
             </div>
           </div>
 
-          {/* Promise Fulfillment Trend Chart */}
-          <div className="bg-white border border-neutral-200 rounded-xl p-5 md:p-6 shadow-card space-y-4">
-            <div className="flex items-center justify-between">
+          {/* Tracked Promise-to-Pay Accounts Table (Clickable to Case Workspace) */}
+          <div className="bg-white border border-neutral-200 rounded-xl shadow-card overflow-hidden">
+            <div className="p-4 md:p-5 border-b border-neutral-100 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-neutral-900">
-                  Promise-to-Pay Fulfillment Trend
+                  Tracked Promise-to-Pay Accounts ({receivableCases.length})
                 </h3>
-                <p className="text-xs text-neutral-500">Historical monthly settlement fulfillment rates</p>
+                <p className="text-xs text-neutral-500">
+                  Click any account to manage commitment dates, verify settlement, or inspect escalation logs
+                </p>
               </div>
-              <Calendar className="w-4 h-4 text-neutral-400" />
+              <span className="text-xs font-semibold text-brand-600 bg-brand-50 px-2.5 py-1 rounded-full border border-brand-200">
+                ✦ Click row to inspect
+              </span>
             </div>
 
-            <div className="h-64 w-full pt-2">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={promiseTrendData} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" vertical={false} />
-                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#64748B' }} />
-                  <YAxis tickFormatter={(val) => `${val}%`} tick={{ fontSize: 11, fill: '#64748B' }} domain={[50, 100]} />
-                  <Tooltip
-                    formatter={(val: any) => [`${val}%`, 'Fulfillment Rate']}
-                    contentStyle={{ backgroundColor: '#FFFFFF', borderRadius: '8px', borderColor: '#E2E8F0', fontSize: '12px' }}
-                  />
-                  <Line type="monotone" dataKey="rate" stroke="#10B981" strokeWidth={3} dot={{ r: 5, fill: '#10B981' }} />
-                </LineChart>
-              </ResponsiveContainer>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-neutral-50 border-b border-neutral-200 text-neutral-500 uppercase tracking-wider text-[11px] font-semibold">
+                    <th className="py-3 px-4">Customer / Company</th>
+                    <th className="py-3 px-4">Invoice ID</th>
+                    <th className="py-3 px-4 text-right">Promised Amount</th>
+                    <th className="py-3 px-4">Promised Date</th>
+                    <th className="py-3 px-4">Commitment Status</th>
+                    <th className="py-3 px-4 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-100">
+                  {receivableCases.map((c) => {
+                    const promise = c.receivableDetails?.promiseToPay;
+                    const isRecovered = c.status === 'recovered';
+                    const isOverdue = promise?.status === 'overdue';
+
+                    return (
+                      <tr
+                        key={c.id}
+                        className="hover:bg-neutral-50/80 transition-colors group cursor-pointer"
+                      >
+                        <td className="py-3.5 px-4">
+                          <Link href={`/recovery/${c.id}`} className="block">
+                            <span className="font-bold text-neutral-900 group-hover:text-brand-600 transition-colors">
+                              {c.customer.company}
+                            </span>
+                            <span className="text-[11px] text-neutral-500 block">
+                              {c.customer.name} · {c.customer.email}
+                            </span>
+                          </Link>
+                        </td>
+                        <td className="py-3.5 px-4 font-mono font-medium text-neutral-700">
+                          {c.receivableDetails?.invoiceId || `INV-${c.paymentId.slice(-5)}`}
+                        </td>
+                        <td className="py-3.5 px-4 text-right font-extrabold text-neutral-900 tabular-nums">
+                          {formatINRFull(promise?.amount || c.amount)}
+                        </td>
+                        <td className="py-3.5 px-4 text-neutral-600 font-medium">
+                          {promise?.promisedDate
+                            ? new Date(promise.promisedDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+                            : '31 Aug 2026'}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          {isRecovered || promise?.status === 'fulfilled' ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-success-700 bg-success-50 px-2 py-0.5 rounded border border-success-200">
+                              <CheckCircle2 className="w-3 h-3" />
+                              Fulfilled
+                            </span>
+                          ) : isOverdue ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-danger-700 bg-danger-50 px-2 py-0.5 rounded border border-danger-200">
+                              <AlertTriangle className="w-3 h-3" />
+                              Overdue
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-warning-800 bg-warning-50 px-2 py-0.5 rounded border border-warning-200">
+                              <Clock className="w-3 h-3" />
+                              Promised
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3.5 px-4 text-right">
+                          <Link
+                            href={`/recovery/${c.id}`}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-brand-50 hover:bg-brand-100 text-brand-700 font-bold rounded-md text-xs border border-brand-200 transition-colors"
+                          >
+                            <span>Manage</span>
+                            <ArrowUpRight className="w-3 h-3" />
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

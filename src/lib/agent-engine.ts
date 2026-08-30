@@ -6,9 +6,13 @@ import {
   TimelineStep,
   Guardrails,
   AgentDecision,
+  RecoveryOption,
 } from './types';
 import { evaluateGuardrails, evaluateStoppingCondition, DEFAULT_GUARDRAILS } from './guardrail-engine';
+import { evaluatePolicyGate } from './policy-gate';
+import { generateRecoveryOptions, selectBestAction, calculateBaseRecoveryProbability, calculateERV } from './erv-engine';
 import { mockPaymentProvider } from './mock-provider';
+import { idempotencyRegistry } from './idempotency';
 
 export interface AgentStepResult {
   updatedCase: RecoveryCase;
@@ -29,7 +33,7 @@ export class ReclaimAgentEngine {
     };
   }
 
-  // Tool 2: Analyze Failure Root Cause
+  // Tool 2: Analyze Failure Root Cause (Multi-surface)
   async analyze_failure(failureReason: FailureReason) {
     switch (failureReason) {
       case 'Insufficient funds':
@@ -61,11 +65,43 @@ export class ReclaimAgentEngine {
           recommendation: 'Generate fallback multi-rail UPI/NetBanking payment link.',
         };
       case 'Invoice overdue':
+      case 'Customer delayed payment':
         return {
           isTransient: false,
           actionFamily: 'reminder' as const,
           optimalWaitHours: 0,
-          recommendation: 'Send executive conversational WhatsApp reminder.',
+          recommendation: 'Send executive conversational WhatsApp reminder with 1-click RTGS/UPI link.',
+        };
+      case 'Payment page abandonment':
+      case 'OTP abandonment':
+        return {
+          isTransient: true,
+          actionFamily: 'payment_link' as const,
+          optimalWaitHours: 1,
+          recommendation: 'Send personalized recovery payment link via WhatsApp with active cart retention.',
+        };
+      case 'Session timeout':
+      case 'Payment method hesitation':
+        return {
+          isTransient: true,
+          actionFamily: 'retry_checkout' as const,
+          optimalWaitHours: 0.5,
+          recommendation: 'Offer alternate payment rails (UPI / Instant EMI) with saved session context.',
+        };
+      case 'Partial payment':
+        return {
+          isTransient: false,
+          actionFamily: 'promise_to_pay' as const,
+          optimalWaitHours: 0,
+          recommendation: 'Record Promise-to-Pay workflow for remaining ledger balance.',
+        };
+      case 'Repeated overdue invoice':
+      case 'High-value enterprise invoice':
+        return {
+          isTransient: false,
+          actionFamily: 'escalation' as const,
+          optimalWaitHours: 0,
+          recommendation: 'Route to dedicated Account Manager for executive payment reconciliation.',
         };
       default:
         return {
@@ -79,72 +115,79 @@ export class ReclaimAgentEngine {
 
   // Tool 3: Calculate Recovery Probability
   calculate_recovery_probability(customer: Customer, failureReason: FailureReason, attemptsUsed: number): number {
-    let baseScore = 60;
-
-    // History weighting
-    if (customer.paymentHistory.failedCount === 0 && customer.paymentHistory.successfulCount > 3) {
-      baseScore += 22; // High reliability boost
-    } else if (customer.paymentHistory.failedCount > 2) {
-      baseScore -= 18;
-    }
-
-    // Failure reason weighting
-    if (failureReason === 'Insufficient funds') baseScore += 4;
-    if (failureReason === 'Invoice overdue') baseScore += 10;
-    if (failureReason === 'Bank decline') baseScore -= 5;
-    if (failureReason === 'Mandate failure') baseScore -= 10;
-
-    // Attempt degradation
-    baseScore -= attemptsUsed * 15;
-
-    // LTV factor
-    if (customer.lifetimeValue > 300000) baseScore += 6;
-
-    return Math.min(96, Math.max(15, baseScore));
+    return calculateBaseRecoveryProbability(customer, failureReason, attemptsUsed);
   }
 
-  // Tool 4: Select Intervention
+  // Tool 4: Generate ERV Options
+  generate_recovery_options(
+    amount: number,
+    customer: Customer,
+    failureReason: FailureReason,
+    revenueType: RecoveryCase['revenueType'],
+    attemptsUsed: number
+  ): RecoveryOption[] {
+    return generateRecoveryOptions(amount, customer, failureReason, revenueType, attemptsUsed);
+  }
+
+  // Tool 5: Select Intervention using Expected Recovery Value
   select_intervention(
     failureReason: FailureReason,
     probability: number,
     amount: number,
-    guardrails: Guardrails
-  ): { intervention: InterventionType; rationale: string } {
+    guardrails: Guardrails,
+    customer?: Customer,
+    revenueType: RecoveryCase['revenueType'] = 'payment',
+    attemptsUsed: number = 0
+  ): { intervention: InterventionType; rationale: string; expectedValue: number; options: RecoveryOption[] } {
+    const dummyCust: Customer = customer || {
+      id: 'cust-tmp',
+      name: 'Customer',
+      company: 'Enterprise',
+      email: 'billing@example.com',
+      phone: '+91 99999 00000',
+      customerType: 'Mid-Market',
+      lifetimeValue: 300000,
+      paymentHistory: { successfulCount: 5, failedCount: 0, lastPaymentDate: new Date().toISOString(), avgTicketSize: amount },
+      preferredChannel: 'whatsapp',
+    };
+
+    const options = generateRecoveryOptions(amount, dummyCust, failureReason, revenueType, attemptsUsed);
+    const bestOption = selectBestAction(
+      options,
+      guardrails,
+      attemptsUsed,
+      0,
+      guardrails.maxRetries,
+      guardrails.maxContactAttempts
+    );
+
     if (amount >= guardrails.highValueApprovalThreshold && guardrails.highValueApprovalRequired) {
       return {
-        intervention: 'notify_account_manager',
-        rationale: `Amount exceeds high-value threshold (${new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(guardrails.highValueApprovalThreshold)}). Requires human sign-off.`,
+        intervention: revenueType === 'receivable' ? 'account_manager_escalation' : 'notify_account_manager',
+        rationale: `Amount ₹${amount.toLocaleString('en-IN')} exceeds high-value threshold (₹${guardrails.highValueApprovalThreshold.toLocaleString('en-IN')}). Highest ERV action requires human sign-off.`,
+        expectedValue: bestOption ? bestOption.expectedValue : calculateERV(probability, amount),
+        options,
       };
     }
 
-    if (failureReason === 'Card expired') {
+    if (bestOption) {
       return {
-        intervention: 'request_payment_method_update',
-        rationale: 'Card expiry detected. Direct retry will fail; payment method update requested.',
-      };
-    }
-
-    if (failureReason === 'Invoice overdue') {
-      return {
-        intervention: 'send_whatsapp_reminder',
-        rationale: 'Overdue invoice; instant conversational WhatsApp reminder recommended.',
-      };
-    }
-
-    if (failureReason === 'Bank decline') {
-      return {
-        intervention: 'generate_payment_link',
-        rationale: 'Issuer decline; multi-rail UPI/NetBanking payment link generated.',
+        intervention: bestOption.intervention,
+        rationale: bestOption.rationale,
+        expectedValue: bestOption.expectedValue,
+        options,
       };
     }
 
     return {
       intervention: 'retry_payment',
-      rationale: 'Transient failure with strong recovery probability. Scheduled smart retry.',
+      rationale: 'Scheduled smart retry within guardrails.',
+      expectedValue: calculateERV(probability, amount),
+      options,
     };
   }
 
-  // Execute single interactive step on a case
+  // Execute single interactive step on a case with Deterministic Action Gate
   async executeCaseStep(
     currentCase: RecoveryCase,
     guardrails: Guardrails = DEFAULT_GUARDRAILS
@@ -173,40 +216,82 @@ export class ReclaimAgentEngine {
 
     // Step Logic based on current state
     if (caseCopy.status === 'at_risk') {
-      // Step: Run Diagnosis & Guardrail verification -> transition to ACTING / RECOVERING
-      const guardrailEval = evaluateGuardrails(caseCopy, guardrails);
+      // 1. Calculate ERV and generate recovery options if not present
+      if (!caseCopy.decision.recoveryOptions || caseCopy.decision.recoveryOptions.length === 0) {
+        caseCopy.decision.recoveryOptions = generateRecoveryOptions(
+          caseCopy.amount,
+          caseCopy.customer,
+          caseCopy.rootCause,
+          caseCopy.revenueType || 'payment',
+          caseCopy.attemptsUsed
+        );
+        const best = caseCopy.decision.recoveryOptions[0];
+        if (best) {
+          caseCopy.decision.expectedRecoveryValue = best.expectedValue;
+        }
+      }
+
+      // 2. Evaluate Deterministic Policy Gate
+      const policyResult = evaluatePolicyGate(
+        caseCopy,
+        caseCopy.interventionType,
+        guardrails,
+        idempotencyRegistry.getRegistry()
+      );
+
+      const retryCheck = policyResult.checks.find((c) => c.name === 'Retry limit');
+      const contactCheck = policyResult.checks.find((c) => c.name === 'Contact frequency');
+      const quietCheck = policyResult.checks.find((c) => c.name === 'Quiet hours');
+      const windowCheck = policyResult.checks.find((c) => c.name === 'Recovery window');
+      const thresholdCheck = policyResult.checks.find((c) => c.name === 'Amount threshold');
+      const idempCheck = policyResult.checks.find((c) => c.name === 'Idempotency');
+
       caseCopy.guardrailChecks = {
-        retryLimitPassed: guardrailEval.retryLimitPassed,
-        contactLimitPassed: guardrailEval.contactLimitPassed,
-        quietHoursPassed: guardrailEval.quietHoursPassed,
-        recoveryWindowPassed: guardrailEval.recoveryWindowPassed,
-        highValueApprovalRequired: guardrailEval.highValueApprovalRequired,
+        retryLimitPassed: retryCheck ? retryCheck.passed : true,
+        contactLimitPassed: contactCheck ? contactCheck.passed : true,
+        quietHoursPassed: quietCheck ? quietCheck.passed : true,
+        recoveryWindowPassed: windowCheck ? windowCheck.passed : true,
+        highValueApprovalRequired: thresholdCheck ? !thresholdCheck.passed : false,
+        idempotencyPassed: idempCheck ? idempCheck.passed : true,
+        actionEligibilityPassed: policyResult.approved,
       };
 
-      if (guardrailEval.highValueApprovalRequired && !currentCase.decision.executedAt) {
-        caseCopy.currentAction = 'High-value approval required before autonomous action';
-        const step: TimelineStep = {
+      // Check if policy gate blocked execution
+      if (!policyResult.approved) {
+        const blockMessage = policyResult.blockReason || 'Action gated by safety boundaries.';
+        caseCopy.currentAction = `Policy Blocked: ${blockMessage}`;
+
+        const blockStep: TimelineStep = {
           id: `tl_${Date.now()}`,
           timestamp: timeStr,
           actor: 'Reclaim Agent',
-          event: 'Guardrail check: High-value approval required',
+          event: `Deterministic policy gate: Action Blocked`,
           toolUsed: 'check_guardrails',
-          details: `Case amount ₹${caseCopy.amount.toLocaleString('en-IN')} exceeds threshold of ₹${guardrails.highValueApprovalThreshold.toLocaleString('en-IN')}.`,
-          status: 'completed',
+          details: blockMessage,
+          status: 'failed',
           state: 'WAITING',
         };
-        caseCopy.timeline.push(step);
+        caseCopy.timeline.push(blockStep);
+
         return {
           updatedCase: caseCopy,
-          newTimelineStep: step,
+          newTimelineStep: blockStep,
           isComplete: false,
-          message: 'Paused for high-value human approval.',
+          message: blockMessage,
         };
+      }
+
+      // Idempotency: register event
+      if (caseCopy.eventId) {
+        idempotencyRegistry.registerEvent(caseCopy.eventId);
       }
 
       // Transition to Recovering and execute tool
       caseCopy.status = 'recovering';
       caseCopy.attemptsUsed += 1;
+      if (['send_whatsapp_reminder', 'send_email_reminder', 'send_followup', 'send_payment_link'].includes(caseCopy.interventionType)) {
+        caseCopy.contactAttemptsUsed += 1;
+      }
       caseCopy.currentAction = `Executing ${caseCopy.interventionType.replace(/_/g, ' ')}`;
 
       const step: TimelineStep = {
@@ -215,7 +300,7 @@ export class ReclaimAgentEngine {
         actor: 'Reclaim Agent',
         event: `Executed recovery action: ${caseCopy.recommendedAction}`,
         toolUsed: caseCopy.interventionType,
-        details: `Dispatched bounded recovery action via ${caseCopy.payment.provider}. Attempt ${caseCopy.attemptsUsed}/${guardrails.maxRetries}.`,
+        details: `Dispatched bounded intervention (ERV: ₹${(caseCopy.decision.expectedRecoveryValue || caseCopy.amount).toLocaleString('en-IN')}). Policy gate: APPROVED.`,
         status: 'completed',
         state: 'ACTING',
       };
@@ -225,12 +310,12 @@ export class ReclaimAgentEngine {
         updatedCase: caseCopy,
         newTimelineStep: step,
         isComplete: false,
-        message: `Action executed: ${caseCopy.recommendedAction}`,
+        message: `Action approved & executed: ${caseCopy.recommendedAction}`,
       };
     }
 
     if (caseCopy.status === 'recovering') {
-      // Execute Verification & Recovery
+      // Execute Verification & Recovery based on surface
       const paymentResult = await mockPaymentProvider.retryPayment(caseCopy.paymentId);
 
       if (paymentResult.success) {
@@ -240,13 +325,20 @@ export class ReclaimAgentEngine {
         caseCopy.currentAction = 'Payment verified & recovered';
         caseCopy.nextAction = 'Workflow stopped automatically';
 
+        const surfaceLabel =
+          caseCopy.revenueType === 'checkout'
+            ? 'Checkout payment confirmed'
+            : caseCopy.revenueType === 'receivable'
+            ? 'Invoice settlement verified'
+            : 'Payment authorization confirmed';
+
         const verifyStep: TimelineStep = {
           id: `tl_${Date.now()}_v`,
           timestamp: timeStr,
           actor: 'System',
-          event: 'Payment webhook received: SUCCESS',
+          event: `${surfaceLabel}: SUCCESS`,
           toolUsed: 'verify_payment_outcome',
-          details: `Payment authorization confirmed via Razorpay. ${new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(caseCopy.amount)} recovered.`,
+          details: `Settlement confirmed. ${new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(caseCopy.amount)} recovered.`,
           result: `✓ ${new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(caseCopy.amount)} recovered`,
           status: 'completed',
           state: 'RECOVERED',
@@ -258,7 +350,7 @@ export class ReclaimAgentEngine {
           actor: 'Reclaim Agent',
           event: 'Workflow automatically stopped',
           toolUsed: 'stop_workflow',
-          details: 'Recovery objective fulfilled. No further actions or notifications needed.',
+          details: 'Recovery objective fulfilled. Bounded execution complete. No further actions needed.',
           result: 'Clean stop',
           status: 'completed',
           state: 'STOPPED',
@@ -320,3 +412,4 @@ export class ReclaimAgentEngine {
 }
 
 export const reclaimAgent = new ReclaimAgentEngine();
+

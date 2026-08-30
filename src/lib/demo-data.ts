@@ -1,15 +1,5 @@
 import { Customer, Payment, RecoveryCase, AgentDecision, IntegrationSource, RecoveryKPIData } from './types';
-
-export const INITIAL_KPIS: RecoveryKPIData = {
-  revenueAtRisk: 1842000, // ₹18.42L
-  recovering: 684000,     // ₹6.84L
-  recovered: 724000,      // ₹7.24L (HERO METRIC)
-  recoveryRate: 39.3,     // 39.3%
-  activeCasesCount: 143,  // 143 active cases
-  trendVsLastMonth: 18.4, // +18.4%
-  eventsProcessed: 1248,
-  actionsTaken: 312,
-};
+import { generateSyntheticCases } from './simulation-engine';
 
 export const DEMO_CUSTOMERS: Customer[] = [
   {
@@ -27,6 +17,40 @@ export const DEMO_CUSTOMERS: Customer[] = [
       avgTicketSize: 24999,
     },
     preferredChannel: 'whatsapp',
+    accountManager: 'Priya Mehta',
+  },
+  {
+    id: 'cust-rahul',
+    name: 'Rahul Sharma',
+    company: 'NextGen Retail',
+    email: 'rahul.sharma@nextgenretail.in',
+    phone: '+91 98112 33445',
+    customerType: 'Mid-Market',
+    lifetimeValue: 185000,
+    paymentHistory: {
+      successfulCount: 6,
+      failedCount: 1,
+      lastPaymentDate: '2026-08-10T14:30:00Z',
+      avgTicketSize: 12999,
+    },
+    preferredChannel: 'whatsapp',
+    accountManager: 'Vikram Seth',
+  },
+  {
+    id: 'cust-acme-tech',
+    name: 'Vikrant Goel',
+    company: 'Acme Technologies',
+    email: 'treasury@acmetechnologies.io',
+    phone: '+91 98765 43210',
+    customerType: 'Enterprise',
+    lifetimeValue: 1250000,
+    paymentHistory: {
+      successfulCount: 12,
+      failedCount: 1,
+      lastPaymentDate: '2026-06-30T11:00:00Z',
+      avgTicketSize: 240000,
+    },
+    preferredChannel: 'email',
     accountManager: 'Priya Mehta',
   },
   {
@@ -149,12 +173,17 @@ export const DEMO_CUSTOMERS: Customer[] = [
   },
 ];
 
-export const INITIAL_CASES: RecoveryCase[] = [
+// ─── Primary Showcase Demo Cases (Polished End-to-End Scenarios) ───────────────
+
+const SHOWCASE_CASES: RecoveryCase[] = [
+  // 1. Payment Demo: Acme Corp (Insufficient Funds -> Smart Retry)
   {
     id: 'case-acme-10291',
     customerId: 'cust-acme',
     customer: DEMO_CUSTOMERS[0],
     paymentId: 'pay_rzp_acme_10291',
+    revenueType: 'payment',
+    eventId: 'evt_pay_acme_10291',
     payment: {
       id: 'pay_rzp_acme_10291',
       customerId: 'cust-acme',
@@ -188,7 +217,14 @@ export const INITIAL_CASES: RecoveryCase[] = [
       recommendedAction: 'Retry payment tomorrow at 10:00 AM',
       interventionType: 'retry_payment',
       recoveryProbability: 82,
-      explanation: 'This is the customer\'s first failure and their historical payment behavior indicates a high probability of recovery.',
+      expectedRecoveryValue: 20499,
+      explanation: 'First payment failure with 8 consecutive historical clearings. Scheduled smart retry yields the highest expected recovery value (₹20,499) within configured boundaries.',
+      recoveryOptions: [
+        { intervention: 'retry_payment', label: 'Smart Gateway Retry', probability: 82, expectedValue: 20499, rationale: '82% probability · ₹20,499 expected' },
+        { intervention: 'generate_payment_link', label: 'Payment Link', probability: 61, expectedValue: 15249, rationale: '61% probability · ₹15,249 expected' },
+        { intervention: 'send_whatsapp_reminder', label: 'WhatsApp Reminder', probability: 47, expectedValue: 11749, rationale: '47% probability · ₹11,749 expected' },
+        { intervention: 'human_escalation', label: 'Human Escalation', probability: 74, expectedValue: 18499, rationale: '74% probability · ₹18,499 expected' },
+      ],
       rationaleItems: [
         { text: 'First payment failure (clean history)', passed: true, type: 'history' },
         { text: 'Strong payment history (8 successful payments)', passed: true, type: 'history' },
@@ -208,7 +244,7 @@ export const INITIAL_CASES: RecoveryCase[] = [
         toolUsed: 'webhook_receiver',
         details: 'Received Razorpay failure webhook (code: INSUFFICIENT_FUNDS)',
         status: 'completed',
-        state: 'DETECTING' as any,
+        state: 'ANALYZING',
       },
       {
         id: 'tl-2',
@@ -224,10 +260,10 @@ export const INITIAL_CASES: RecoveryCase[] = [
         id: 'tl-3',
         timestamp: '13:42:03',
         actor: 'Reclaim Agent',
-        event: 'Recovery probability calculated',
+        event: 'Expected Recovery Value calculated',
         toolUsed: 'calculate_recovery_probability',
-        details: 'Model estimated 82% recovery probability based on salary cycle & liquidity timing.',
-        result: '82% probability',
+        details: 'Model computed ₹20,499 expected recovery (82% prob) for Smart Retry vs ₹15,249 for payment link.',
+        result: '82% probability · ₹20,499 ERV',
         status: 'completed',
         state: 'DECIDING',
       },
@@ -248,13 +284,213 @@ export const INITIAL_CASES: RecoveryCase[] = [
       quietHoursPassed: true,
       recoveryWindowPassed: true,
       highValueApprovalRequired: false,
+      idempotencyPassed: true,
+      actionEligibilityPassed: true,
     },
   },
+
+  // 2. Checkout Demo: Rahul Sharma (Checkout Abandoned -> Payment Link)
+  {
+    id: 'case-checkout-10301',
+    customerId: 'cust-rahul',
+    customer: DEMO_CUSTOMERS[1],
+    paymentId: 'chk_sess_rahul_10301',
+    revenueType: 'checkout',
+    eventId: 'evt_chk_rahul_10301',
+    payment: {
+      id: 'chk_sess_rahul_10301',
+      customerId: 'cust-rahul',
+      amount: 12999,
+      currency: 'INR',
+      status: 'pending',
+      failureReason: 'Payment page abandonment',
+      attemptCount: 0,
+      provider: 'Billing Simulator',
+      createdAt: '2026-08-21T10:10:00Z',
+      updatedAt: '2026-08-21T10:12:00Z',
+    },
+    amount: 12999,
+    status: 'at_risk',
+    riskScore: 'Medium',
+    recoveryProbability: 68,
+    rootCause: 'Payment page abandonment',
+    recommendedAction: 'Send 1-click payment link via WhatsApp',
+    interventionType: 'send_payment_link',
+    currentAction: 'Pending customer outreach',
+    nextAction: 'Deliver instant checkout payment link',
+    attemptsUsed: 0,
+    contactAttemptsUsed: 0,
+    createdAt: '2026-08-21T10:10:00Z',
+    updatedAt: '2026-08-21T10:12:00Z',
+    checkoutDetails: {
+      abandonmentPoint: 'Payment confirmation',
+      sessionId: 'sess_99218',
+      cartValue: 12999,
+      timeSpentSeconds: 180,
+    },
+    decision: {
+      id: 'dec-10301',
+      caseId: 'case-checkout-10301',
+      paymentId: 'chk_sess_rahul_10301',
+      recommendedAction: 'Send 1-click payment link via WhatsApp',
+      interventionType: 'send_payment_link',
+      recoveryProbability: 68,
+      expectedRecoveryValue: 8839,
+      explanation: 'Customer reached payment confirmation but abandoned session. Dynamic 1-click payment link sent via preferred WhatsApp channel yields 68% conversion (₹8,839 ERV).',
+      recoveryOptions: [
+        { intervention: 'send_payment_link', label: 'Payment Link', probability: 68, expectedValue: 8839, rationale: '68% probability · ₹8,839 expected' },
+        { intervention: 'send_whatsapp_reminder', label: 'WhatsApp Reminder', probability: 54, expectedValue: 7019, rationale: '54% probability · ₹7,019 expected' },
+        { intervention: 'retry_checkout_session', label: 'Retry Session', probability: 42, expectedValue: 5459, rationale: '42% probability · ₹5,459 expected' },
+      ],
+      rationaleItems: [
+        { text: 'Abandoned at payment confirmation step', passed: true, type: 'risk' },
+        { text: 'Preferred channel: WhatsApp verified', passed: true, type: 'timing' },
+        { text: 'Within single-contact limit (0/3 used)', passed: true, type: 'guardrail' },
+      ],
+      status: 'pending',
+      createdAt: '2026-08-21T10:12:00Z',
+    },
+    timeline: [
+      {
+        id: 'tl-c1',
+        timestamp: '10:10:05',
+        actor: 'System',
+        event: 'Checkout session abandoned',
+        details: 'User dropped at Payment Confirmation (Session: sess_99218)',
+        status: 'completed',
+        state: 'ANALYZING',
+      },
+      {
+        id: 'tl-c2',
+        timestamp: '10:11:00',
+        actor: 'Reclaim Agent',
+        event: 'Diagnosis: Payment confirmation abandoned',
+        toolUsed: 'analyze_failure',
+        details: 'Evaluated abandonment telemetry. Selected 1-click payment link with active cart retention.',
+        result: '68% probability · ₹8,839 ERV',
+        status: 'completed',
+        state: 'DECIDING',
+      },
+    ],
+    guardrailChecks: {
+      retryLimitPassed: true,
+      contactLimitPassed: true,
+      quietHoursPassed: true,
+      recoveryWindowPassed: true,
+      highValueApprovalRequired: false,
+      idempotencyPassed: true,
+      actionEligibilityPassed: true,
+    },
+  },
+
+  // 3. Receivable Demo: Acme Technologies (Overdue Invoice -> Promise-to-Pay)
+  {
+    id: 'case-rec-10401',
+    customerId: 'cust-acme-tech',
+    customer: DEMO_CUSTOMERS[2],
+    paymentId: 'inv_acme_10291',
+    revenueType: 'receivable',
+    eventId: 'evt_inv_acme_10291',
+    payment: {
+      id: 'inv_acme_10291',
+      customerId: 'cust-acme-tech',
+      amount: 48000,
+      currency: 'INR',
+      status: 'failed',
+      failureReason: 'Invoice overdue',
+      attemptCount: 1,
+      provider: 'Billing Simulator',
+      createdAt: '2026-08-03T09:00:00Z',
+      updatedAt: '2026-08-21T09:00:00Z',
+    },
+    amount: 48000,
+    status: 'at_risk',
+    riskScore: 'High',
+    recoveryProbability: 75,
+    rootCause: 'Invoice overdue',
+    recommendedAction: 'Send executive follow-up & setup Promise-to-Pay workflow',
+    interventionType: 'promise_to_pay',
+    currentAction: 'Awaiting customer response / payment commitment',
+    nextAction: 'Verify Promise-to-Pay settlement',
+    scheduledTime: 'Tomorrow, 10:00 AM',
+    attemptsUsed: 0,
+    contactAttemptsUsed: 1,
+    createdAt: '2026-08-03T09:00:00Z',
+    updatedAt: '2026-08-21T09:00:00Z',
+    receivableDetails: {
+      invoiceId: 'INV-10291',
+      daysOverdue: 18,
+      dueDate: '2026-08-03T00:00:00Z',
+      promiseToPay: {
+        amount: 48000,
+        promisedDate: '2026-08-25',
+        status: 'promised',
+        createdAt: '2026-08-21T09:00:00Z',
+      },
+    },
+    decision: {
+      id: 'dec-10401',
+      caseId: 'case-rec-10401',
+      paymentId: 'inv_acme_10291',
+      recommendedAction: 'Executive follow-up with Promise-to-Pay tracking',
+      interventionType: 'promise_to_pay',
+      recoveryProbability: 75,
+      expectedRecoveryValue: 36000,
+      explanation: 'Enterprise invoice overdue by 18 days. Established customer with ₹12.5L LTV. Promise-to-Pay commitment of ₹48,000 tracked autonomously.',
+      recoveryOptions: [
+        { intervention: 'promise_to_pay', label: 'Promise-to-Pay Tracking', probability: 75, expectedValue: 36000, rationale: '75% probability · ₹36,000 expected' },
+        { intervention: 'send_followup', label: 'Follow-up Reminder', probability: 64, expectedValue: 30720, rationale: '64% probability · ₹30,720 expected' },
+        { intervention: 'account_manager_escalation', label: 'AM Escalation', probability: 80, expectedValue: 38400, rationale: '80% probability · ₹38,400 expected' },
+      ],
+      rationaleItems: [
+        { text: 'Invoice INV-10291 is 18 days overdue', passed: true, type: 'risk' },
+        { text: 'Strong enterprise profile (12 cleared invoices)', passed: true, type: 'history' },
+        { text: 'Promise-to-Pay logged for ₹48,000', passed: true, type: 'timing' },
+      ],
+      status: 'pending',
+      createdAt: '2026-08-21T09:00:00Z',
+    },
+    timeline: [
+      {
+        id: 'tl-r1',
+        timestamp: 'Aug 03, 09:00',
+        actor: 'System',
+        event: 'Invoice due date passed',
+        details: 'Invoice INV-10291 marked overdue (Amount: ₹48,000)',
+        status: 'completed',
+        state: 'ANALYZING',
+      },
+      {
+        id: 'tl-r2',
+        timestamp: 'Aug 21, 09:00',
+        actor: 'Reclaim Agent',
+        event: 'Customer promised payment — Promise-to-Pay recorded',
+        toolUsed: 'promise_to_pay',
+        details: 'Customer committed to ₹48,000 settlement on Monday. Agent set automated ledger watcher.',
+        result: 'Promise-to-Pay active (₹48,000)',
+        status: 'completed',
+        state: 'WAITING',
+      },
+    ],
+    guardrailChecks: {
+      retryLimitPassed: true,
+      contactLimitPassed: true,
+      quietHoursPassed: true,
+      recoveryWindowPassed: true,
+      highValueApprovalRequired: false,
+      idempotencyPassed: true,
+      actionEligibilityPassed: true,
+    },
+  },
+
+  // 4. Payment: Nova Systems (Card Expired)
   {
     id: 'case-nova-10292',
     customerId: 'cust-nova',
-    customer: DEMO_CUSTOMERS[1],
+    customer: DEMO_CUSTOMERS[3],
     paymentId: 'pay_rzp_nova_10292',
+    revenueType: 'payment',
+    eventId: 'evt_pay_nova_10292',
     amount: 15499,
     status: 'recovering',
     riskScore: 'Medium',
@@ -287,7 +523,13 @@ export const INITIAL_CASES: RecoveryCase[] = [
       recommendedAction: 'Request payment method update',
       interventionType: 'request_payment_method_update',
       recoveryProbability: 76,
-      explanation: 'Card expiry detected. Instant retry would fail; sending secure 1-click update link has 76% conversion within 4 hours.',
+      expectedRecoveryValue: 11779,
+      explanation: 'Card expiry confirmed by gateway. Direct retry would fail; sending secure 1-click update link has 76% conversion within 4 hours.',
+      recoveryOptions: [
+        { intervention: 'request_payment_method_update', label: 'Method Update Link', probability: 76, expectedValue: 11779, rationale: '76% probability · ₹11,779 ERV' },
+        { intervention: 'generate_payment_link', label: 'UPI Payment Link', probability: 58, expectedValue: 8989, rationale: '58% probability · ₹8,989 ERV' },
+        { intervention: 'retry_payment', label: 'Naive Retry', probability: 10, expectedValue: 1549, rationale: '10% probability · Will fail' },
+      ],
       rationaleItems: [
         { text: 'Card expiration confirmed by gateway', passed: true, type: 'risk' },
         { text: '14 successful past payments on file', passed: true, type: 'history' },
@@ -334,13 +576,19 @@ export const INITIAL_CASES: RecoveryCase[] = [
       quietHoursPassed: true,
       recoveryWindowPassed: true,
       highValueApprovalRequired: false,
+      idempotencyPassed: true,
+      actionEligibilityPassed: true,
     },
   },
+
+  // 5. Payment: Globex (Insufficient funds)
   {
     id: 'case-globex-10293',
     customerId: 'cust-globex',
-    customer: DEMO_CUSTOMERS[2],
+    customer: DEMO_CUSTOMERS[4],
     paymentId: 'pay_rzp_globex_10293',
+    revenueType: 'payment',
+    eventId: 'evt_pay_globex_10293',
     amount: 48999,
     status: 'recovering',
     riskScore: 'Low',
@@ -373,6 +621,7 @@ export const INITIAL_CASES: RecoveryCase[] = [
       recommendedAction: 'Retry payment at 14:00 today',
       interventionType: 'retry_payment',
       recoveryProbability: 72,
+      expectedRecoveryValue: 35279,
       explanation: 'High value client with regular afternoon clearing cycles. Automated retry scheduled for 2:00 PM.',
       rationaleItems: [
         { text: 'LTV ₹6.9L enterprise tier', passed: true, type: 'value' },
@@ -409,152 +658,19 @@ export const INITIAL_CASES: RecoveryCase[] = [
       quietHoursPassed: true,
       recoveryWindowPassed: true,
       highValueApprovalRequired: false,
+      idempotencyPassed: true,
+      actionEligibilityPassed: true,
     },
   },
-  {
-    id: 'case-zenith-10294',
-    customerId: 'cust-zenith',
-    customer: DEMO_CUSTOMERS[3],
-    paymentId: 'pay_rzp_zenith_10294',
-    amount: 32799,
-    status: 'at_risk',
-    riskScore: 'Medium',
-    recoveryProbability: 68,
-    rootCause: 'Bank decline',
-    recommendedAction: 'Contact account owner & provide UPI/NetBanking fallback link',
-    interventionType: 'generate_payment_link',
-    currentAction: 'Pending link generation',
-    nextAction: 'Deliver smart multi-rail payment link',
-    attemptsUsed: 1,
-    contactAttemptsUsed: 0,
-    createdAt: '2026-08-21T07:15:00Z',
-    updatedAt: '2026-08-21T07:20:00Z',
-    payment: {
-      id: 'pay_rzp_zenith_10294',
-      customerId: 'cust-zenith',
-      amount: 32799,
-      currency: 'INR',
-      status: 'failed',
-      failureReason: 'Bank decline',
-      attemptCount: 1,
-      provider: 'Razorpay Sandbox',
-      createdAt: '2026-08-21T07:15:00Z',
-      updatedAt: '2026-08-21T07:20:00Z',
-    },
-    decision: {
-      id: 'dec-10294',
-      caseId: 'case-zenith-10294',
-      paymentId: 'pay_rzp_zenith_10294',
-      recommendedAction: 'Deliver alternative UPI/NetBanking payment link',
-      interventionType: 'generate_payment_link',
-      recoveryProbability: 68,
-      explanation: 'Corporate card declined by issuing bank. Multi-rail payment link enables immediate alternate UPI/NetBanking authorization.',
-      rationaleItems: [
-        { text: 'Corporate card limit restriction', passed: true, type: 'risk' },
-        { text: 'Account active for 18 months', passed: true, type: 'history' },
-      ],
-      status: 'pending',
-      createdAt: '2026-08-21T07:18:00Z',
-    },
-    timeline: [
-      {
-        id: 'tl-z1',
-        timestamp: '07:15:00',
-        actor: 'System',
-        event: 'Bank decline received',
-        details: 'Error code: 51 - Decline by issuer',
-        status: 'completed',
-        state: 'ANALYZING',
-      },
-    ],
-    guardrailChecks: {
-      retryLimitPassed: true,
-      contactLimitPassed: true,
-      quietHoursPassed: true,
-      recoveryWindowPassed: true,
-      highValueApprovalRequired: false,
-    },
-  },
-  {
-    id: 'case-innotech-10295',
-    customerId: 'cust-innotech',
-    customer: DEMO_CUSTOMERS[4],
-    paymentId: 'pay_rzp_innotech_10295',
-    amount: 124000,
-    status: 'at_risk',
-    riskScore: 'High',
-    recoveryProbability: 59,
-    rootCause: 'Mandate failure',
-    recommendedAction: 'Notify Account Manager (Vikram Seth) & schedule bounded mandate retry',
-    interventionType: 'notify_account_manager',
-    currentAction: 'Awaiting high-value human approval (₹1.24L > ₹50,000 threshold)',
-    nextAction: 'Escalate to account manager',
-    attemptsUsed: 0,
-    contactAttemptsUsed: 0,
-    createdAt: '2026-08-21T06:00:00Z',
-    updatedAt: '2026-08-21T06:05:00Z',
-    payment: {
-      id: 'pay_rzp_innotech_10295',
-      customerId: 'cust-innotech',
-      amount: 124000,
-      currency: 'INR',
-      status: 'failed',
-      failureReason: 'Mandate failure',
-      attemptCount: 1,
-      provider: 'Razorpay Sandbox',
-      createdAt: '2026-08-21T06:00:00Z',
-      updatedAt: '2026-08-21T06:05:00Z',
-    },
-    decision: {
-      id: 'dec-10295',
-      caseId: 'case-innotech-10295',
-      paymentId: 'pay_rzp_innotech_10295',
-      recommendedAction: 'High-value escalation: Notify Account Manager Vikram Seth',
-      interventionType: 'notify_account_manager',
-      recoveryProbability: 59,
-      explanation: 'Mandate limit cap breached on recurring invoice of ₹1.24L. Guardrail requires human sign-off before customer contact.',
-      rationaleItems: [
-        { text: 'High-value threshold exceeded (₹1.24L > ₹50k)', passed: false, type: 'guardrail' },
-        { text: 'e-Mandate token renewal required', passed: true, type: 'risk' },
-        { text: 'Enterprise LTV ₹14.5L', passed: true, type: 'value' },
-      ],
-      status: 'pending',
-      createdAt: '2026-08-21T06:02:00Z',
-    },
-    timeline: [
-      {
-        id: 'tl-i1',
-        timestamp: '06:00:10',
-        actor: 'System',
-        event: 'Mandate authorization failed',
-        details: 'Recurring e-mandate limit exceeded (Limit: ₹1,00,000)',
-        status: 'completed',
-        state: 'ANALYZING',
-      },
-      {
-        id: 'tl-i2',
-        timestamp: '06:02:00',
-        actor: 'Reclaim Agent',
-        event: 'Guardrail check paused autonomous action',
-        toolUsed: 'check_guardrails',
-        details: 'Amount ₹1,24,000 exceeds autonomous ₹50,000 limit. Approval requested.',
-        status: 'completed',
-        state: 'WAITING',
-      },
-    ],
-    guardrailChecks: {
-      retryLimitPassed: true,
-      contactLimitPassed: true,
-      quietHoursPassed: true,
-      recoveryWindowPassed: true,
-      highValueApprovalRequired: true,
-    },
-  },
+
+  // 6. Payment: QuantLog (Invoice Overdue -> Recovered)
   {
     id: 'case-quantlog-10288',
     customerId: 'cust-quantlog',
-    customer: DEMO_CUSTOMERS[5],
+    customer: DEMO_CUSTOMERS[7],
     paymentId: 'pay_rzp_quantlog_10288',
+    revenueType: 'payment',
+    eventId: 'evt_pay_quantlog_10288',
     amount: 89000,
     status: 'recovered',
     riskScore: 'Low',
@@ -588,6 +704,7 @@ export const INITIAL_CASES: RecoveryCase[] = [
       recommendedAction: 'WhatsApp reminder with 1-click RTGS/UPI link',
       interventionType: 'send_whatsapp_reminder',
       recoveryProbability: 91,
+      expectedRecoveryValue: 80990,
       explanation: 'Overdue invoice recovered within 4 hours of gentle WhatsApp reminder to Devika Rao.',
       rationaleItems: [
         { text: 'Customer verified active', passed: true, type: 'history' },
@@ -647,13 +764,19 @@ export const INITIAL_CASES: RecoveryCase[] = [
       quietHoursPassed: true,
       recoveryWindowPassed: true,
       highValueApprovalRequired: false,
+      idempotencyPassed: true,
+      actionEligibilityPassed: true,
     },
   },
+
+  // 7. Payment: AlphaStream (Bank Decline -> Escalated)
   {
     id: 'case-alphastream-10280',
     customerId: 'cust-alphastream',
-    customer: DEMO_CUSTOMERS[7],
+    customer: DEMO_CUSTOMERS[9],
     paymentId: 'pay_rzp_alpha_10280',
+    revenueType: 'payment',
+    eventId: 'evt_pay_alpha_10280',
     amount: 78000,
     status: 'escalated',
     riskScore: 'Critical',
@@ -686,6 +809,7 @@ export const INITIAL_CASES: RecoveryCase[] = [
       recommendedAction: 'Escalate to Senior CSM Karan Joshi',
       interventionType: 'human_escalation',
       recoveryProbability: 34,
+      expectedRecoveryValue: 26520,
       explanation: 'Case reached guardrail boundaries (2 retries + 3 reminders completed). Autonomous agent stopped to prevent customer spam.',
       rationaleItems: [
         { text: 'Max retry limit reached (2/2)', passed: false, type: 'guardrail' },
@@ -732,9 +856,46 @@ export const INITIAL_CASES: RecoveryCase[] = [
       quietHoursPassed: true,
       recoveryWindowPassed: true,
       highValueApprovalRequired: true,
+      idempotencyPassed: true,
+      actionEligibilityPassed: true,
     },
   },
 ];
+
+// ─── Generate Full 200+ Cases Dataset (100+ Payments, 50+ Checkout, 50+ Receivables) ────
+
+const SYNTHETIC_DATASET = generateSyntheticCases({
+  totalCases: 210,
+  scenarioMix: {
+    payments: 52,    // ~110 payment cases
+    checkout: 24,    // ~50 checkout cases
+    receivables: 24, // ~50 receivable cases
+  },
+  seed: 1337,
+});
+
+// Merge showcase cases at top for immediate demo access
+export const INITIAL_CASES: RecoveryCase[] = [
+  ...SHOWCASE_CASES,
+  ...SYNTHETIC_DATASET.filter((sc) => !SHOWCASE_CASES.some((sh) => sh.id === sc.id)),
+];
+
+// Compute Initial KPIs from case pool
+const totalAtRisk = INITIAL_CASES.filter((c) => c.status === 'at_risk').reduce((sum, c) => sum + c.amount, 0);
+const totalRecovering = INITIAL_CASES.filter((c) => c.status === 'recovering').reduce((sum, c) => sum + c.amount, 0);
+const totalRecovered = INITIAL_CASES.filter((c) => c.status === 'recovered').reduce((sum, c) => sum + (c.recoveredAmount || c.amount), 0);
+const activeCount = INITIAL_CASES.filter((c) => c.status === 'at_risk' || c.status === 'recovering').length;
+
+export const INITIAL_KPIS: RecoveryKPIData = {
+  revenueAtRisk: totalAtRisk || 1842000,
+  recovering: totalRecovering || 684000,
+  recovered: totalRecovered || 724000,
+  recoveryRate: 41.2,
+  activeCasesCount: activeCount || 143,
+  trendVsLastMonth: 18.4,
+  eventsProcessed: 1248,
+  actionsTaken: 312,
+};
 
 export const DEMO_INTEGRATIONS: IntegrationSource[] = [
   {

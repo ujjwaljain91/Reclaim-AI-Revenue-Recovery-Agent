@@ -16,6 +16,8 @@ import {
   Sparkles,
   Zap,
   LogOut,
+  FlaskConical,
+  TrendingUp,
 } from 'lucide-react';
 import { ReclaimLogo } from './ReclaimLogo';
 import { useReclaim } from '@/context/ReclaimContext';
@@ -57,10 +59,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ onOpenBatchSim, onOpenPaymentS
       children: [
         { label: 'Live Activity', href: '/agent/activity', icon: Activity },
         { label: 'Decisions', href: '/agent/decisions', icon: GitBranch },
+        { label: 'Recovery Strategy', href: '/agent/strategy', icon: TrendingUp },
         { label: 'Guardrails', href: '/agent/guardrails', icon: ShieldCheck },
       ],
     },
     { label: 'Insights', href: '/insights', icon: BarChart3 },
+    { label: 'Recovery Lab', href: '/recovery-lab', icon: FlaskConical, badge: 'Benchmark' },
     { label: 'Integrations', href: '/integrations', icon: Plug, badge: 'Sandbox' },
     { label: 'Settings', href: '/settings', icon: Settings },
   ];

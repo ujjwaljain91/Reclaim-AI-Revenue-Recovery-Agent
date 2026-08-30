@@ -11,19 +11,37 @@ import {
   CheckCircle2,
   Clock,
   AlertTriangle,
+  CreditCard,
+  ShoppingCart,
+  FileText,
+  Layers,
 } from 'lucide-react';
 import { useReclaim } from '@/context/ReclaimContext';
 import { RecoveryOpportunitiesTable } from '@/components/reclaim/RecoveryOpportunitiesTable';
 import { formatINR } from '@/lib/utils';
-import { FailureReason, CaseStatus } from '@/lib/types';
+import { FailureReason, CaseStatus, RevenueType } from '@/lib/types';
 
 export default function RecoveryQueuePage() {
-  const { cases, activeFilter, setActiveFilter, searchQuery, setSearchQuery } = useReclaim();
+  const {
+    cases,
+    activeFilter,
+    setActiveFilter,
+    revenueFilter,
+    setRevenueFilter,
+    searchQuery,
+    setSearchQuery,
+  } = useReclaim();
   const [selectedReason, setSelectedReason] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'probability' | 'amount' | 'recent'>('probability');
 
-  // Filter cases based on status tab, search query, and failure reason
+  // Filter cases based on revenue surface (All | Payments | Checkout | Receivables), status tab, search query, and failure reason
   const filteredCases = cases
+    .filter((c) => {
+      if (revenueFilter === 'payment') return c.revenueType === 'payment';
+      if (revenueFilter === 'checkout') return c.revenueType === 'checkout';
+      if (revenueFilter === 'receivable') return c.revenueType === 'receivable';
+      return true; // 'all'
+    })
     .filter((c) => {
       if (activeFilter === 'at_risk') return c.status === 'at_risk';
       if (activeFilter === 'recovering') return c.status === 'recovering';
@@ -51,17 +69,32 @@ export default function RecoveryQueuePage() {
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
 
-  const getTabCount = (status: string) => {
-    if (status === 'all') return cases.length;
-    return cases.filter((c) => c.status === status).length;
+  const getSurfaceCount = (type: 'all' | 'payment' | 'checkout' | 'receivable') => {
+    if (type === 'all') return cases.length;
+    return cases.filter((c) => c.revenueType === type).length;
   };
 
-  const tabs: { id: string; label: string; count: number }[] = [
-    { id: 'all', label: 'All Cases', count: getTabCount('all') },
-    { id: 'at_risk', label: 'At Risk', count: getTabCount('at_risk') },
-    { id: 'recovering', label: 'Recovering', count: getTabCount('recovering') },
-    { id: 'recovered', label: 'Recovered', count: getTabCount('recovered') },
-    { id: 'escalated', label: 'Escalated', count: getTabCount('escalated') },
+  const getStatusCount = (status: string) => {
+    const baseList = revenueFilter === 'all'
+      ? cases
+      : cases.filter((c) => c.revenueType === revenueFilter);
+    if (status === 'all') return baseList.length;
+    return baseList.filter((c) => c.status === status).length;
+  };
+
+  const surfaceTabs: { id: 'all' | 'payment' | 'checkout' | 'receivable'; label: string; icon: any; count: number }[] = [
+    { id: 'all', label: 'All Surfaces', icon: Layers, count: getSurfaceCount('all') },
+    { id: 'payment', label: 'Payments', icon: CreditCard, count: getSurfaceCount('payment') },
+    { id: 'checkout', label: 'Checkout', icon: ShoppingCart, count: getSurfaceCount('checkout') },
+    { id: 'receivable', label: 'Receivables', icon: FileText, count: getSurfaceCount('receivable') },
+  ];
+
+  const statusTabs: { id: string; label: string; count: number }[] = [
+    { id: 'all', label: 'All Cases', count: getStatusCount('all') },
+    { id: 'at_risk', label: 'At Risk', count: getStatusCount('at_risk') },
+    { id: 'recovering', label: 'Recovering', count: getStatusCount('recovering') },
+    { id: 'recovered', label: 'Recovered', count: getStatusCount('recovered') },
+    { id: 'escalated', label: 'Escalated', count: getStatusCount('escalated') },
   ];
 
   return (
@@ -73,21 +106,52 @@ export default function RecoveryQueuePage() {
             Recovery Queue
           </h2>
           <p className="text-xs md:text-sm text-neutral-500 mt-0.5">
-            Prioritized by recovery probability, customer LTV, and optimal clearing window.
+            Unified revenue recovery stream across failed payments, checkout drop-offs, and B2B receivables.
           </p>
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* Surface Navigation Tabs (Prompt Section 16: All | Payments | Checkout | Receivables) */}
+      <div className="bg-white p-1.5 rounded-xl border border-neutral-200 shadow-xs flex flex-wrap gap-1.5">
+        {surfaceTabs.map((tab) => {
+          const isActive = revenueFilter === tab.id;
+          const Icon = tab.icon;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setRevenueFilter(tab.id)}
+              className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold transition-all min-h-[44px] cursor-pointer ${
+                isActive
+                  ? 'bg-brand-500 text-white shadow-xs'
+                  : 'bg-transparent text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900'
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              <span>{tab.label}</span>
+              <span
+                className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                  isActive
+                    ? 'bg-brand-600 text-white'
+                    : 'bg-neutral-100 text-neutral-600'
+                }`}
+              >
+                {tab.count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Status Filter Tabs */}
       <div className="border-b border-neutral-200">
-        <nav className="flex space-x-2 md:space-x-6 overflow-x-auto pb-px" aria-label="Tabs">
-          {tabs.map((tab) => {
+        <nav className="flex space-x-2 md:space-x-6 overflow-x-auto pb-px" aria-label="Status Tabs">
+          {statusTabs.map((tab) => {
             const isActive = activeFilter === tab.id;
             return (
               <button
                 key={tab.id}
                 onClick={() => setActiveFilter(tab.id)}
-                className={`py-3 px-2 border-b-2 font-semibold text-xs md:text-sm whitespace-nowrap flex items-center gap-2 transition-colors min-h-[44px] ${
+                className={`py-3 px-2 border-b-2 font-semibold text-xs md:text-sm whitespace-nowrap flex items-center gap-2 transition-colors min-h-[44px] cursor-pointer ${
                   isActive
                     ? 'border-brand-500 text-brand-700 font-bold'
                     : 'border-transparent text-neutral-500 hover:text-neutral-700 hover:border-neutral-300'
@@ -129,7 +193,7 @@ export default function RecoveryQueuePage() {
           <select
             value={selectedReason}
             onChange={(e) => setSelectedReason(e.target.value)}
-            className="px-2.5 py-2 bg-white border border-neutral-300 rounded-md text-xs text-neutral-700 focus:outline-none focus:ring-2 focus:ring-brand-500 font-medium"
+            className="px-2.5 py-2 bg-white border border-neutral-300 rounded-md text-xs text-neutral-700 focus:outline-none focus:ring-2 focus:ring-brand-500 font-medium cursor-pointer"
           >
             <option value="all">All Failure Causes</option>
             <option value="Insufficient funds">Insufficient funds</option>
@@ -137,13 +201,16 @@ export default function RecoveryQueuePage() {
             <option value="Bank decline">Bank decline</option>
             <option value="Mandate failure">Mandate failure</option>
             <option value="Invoice overdue">Invoice overdue</option>
+            <option value="Payment page abandonment">Payment page abandonment</option>
+            <option value="OTP abandonment">OTP abandonment</option>
+            <option value="Customer delayed payment">Customer delayed payment</option>
           </select>
 
           {/* Sort By */}
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as any)}
-            className="px-2.5 py-2 bg-white border border-neutral-300 rounded-md text-xs text-neutral-700 focus:outline-none focus:ring-2 focus:ring-brand-500 font-medium"
+            className="px-2.5 py-2 bg-white border border-neutral-300 rounded-md text-xs text-neutral-700 focus:outline-none focus:ring-2 focus:ring-brand-500 font-medium cursor-pointer"
           >
             <option value="probability">Sort: Highest Probability</option>
             <option value="amount">Sort: Highest Amount</option>
@@ -156,8 +223,8 @@ export default function RecoveryQueuePage() {
       {filteredCases.length > 0 ? (
         <RecoveryOpportunitiesTable
           cases={filteredCases}
-          title={`Showing ${filteredCases.length} Recovery Opportunities`}
-          subtitle="Click on any case to review full diagnostic context and execute bounded interventions."
+          title={`Showing ${filteredCases.length} Recovery Opportunities (${revenueFilter.toUpperCase()})`}
+          subtitle="Click on any case to review full diagnostic context, Expected Recovery Value, and deterministic policy gates."
           showViewAll={false}
         />
       ) : (
@@ -169,15 +236,16 @@ export default function RecoveryQueuePage() {
             No active recovery cases match your filters
           </h3>
           <p className="text-xs text-neutral-500 max-w-sm mx-auto">
-            Your revenue is currently clear for this category. Reclaim is monitoring incoming webhooks for new recovery opportunities.
+            Your revenue is clear for this category. Reclaim is monitoring incoming webhooks for new recovery opportunities.
           </p>
           <button
             onClick={() => {
               setActiveFilter('all');
+              setRevenueFilter('all');
               setSelectedReason('all');
               setSearchQuery('');
             }}
-            className="px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md text-xs font-semibold transition-colors"
+            className="px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md text-xs font-semibold transition-colors cursor-pointer"
           >
             Reset Filters
           </button>

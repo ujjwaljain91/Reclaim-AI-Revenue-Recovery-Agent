@@ -16,6 +16,8 @@ import {
   Activity,
   GitBranch,
   LogOut,
+  FlaskConical,
+  TrendingUp,
 } from 'lucide-react';
 import { ReclaimLogo } from './ReclaimLogo';
 import { useReclaim } from '@/context/ReclaimContext';
@@ -56,8 +58,10 @@ export const MobileNav: React.FC<MobileNavProps> = ({
     { label: 'Recovery Queue', href: '/recovery', icon: RefreshCw, badge: `${kpis.activeCasesCount}` },
     { label: 'Live Activity', href: '/agent/activity', icon: Activity },
     { label: 'AI Decisions', href: '/agent/decisions', icon: GitBranch },
+    { label: 'Recovery Strategy', href: '/agent/strategy', icon: TrendingUp },
     { label: 'Guardrails', href: '/agent/guardrails', icon: ShieldCheck },
     { label: 'Financial Insights', href: '/insights', icon: BarChart3 },
+    { label: 'Recovery Lab', href: '/recovery-lab', icon: FlaskConical, badge: 'Benchmark' },
     { label: 'Integrations', href: '/integrations', icon: Zap },
     { label: 'Settings', href: '/settings', icon: Settings },
   ];

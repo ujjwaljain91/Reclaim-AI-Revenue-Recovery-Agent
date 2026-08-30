@@ -1,3 +1,6 @@
+// ─── Revenue Surface Types ───────────────────────────────────────────────────
+export type RevenueType = 'payment' | 'checkout' | 'receivable';
+
 export type FailureReason =
   | 'Insufficient funds'
   | 'Card expired'
@@ -6,7 +9,18 @@ export type FailureReason =
   | 'Network failure'
   | 'Mandate failure'
   | 'Payment timeout'
-  | 'Invoice overdue';
+  | 'Invoice overdue'
+  // Checkout abandonment reasons
+  | 'Payment page abandonment'
+  | 'OTP abandonment'
+  | 'Payment method hesitation'
+  | 'Session timeout'
+  | 'High-value checkout abandonment'
+  // Receivable reasons
+  | 'Customer delayed payment'
+  | 'Partial payment'
+  | 'Repeated overdue invoice'
+  | 'High-value enterprise invoice';
 
 export type CaseStatus = 'at_risk' | 'recovering' | 'recovered' | 'escalated' | 'stopped' | 'unrecovered';
 
@@ -28,9 +42,18 @@ export type InterventionType =
   | 'generate_payment_link'
   | 'notify_account_manager'
   | 'schedule_mandate_retry'
-  | 'human_escalation';
+  | 'human_escalation'
+  // Checkout interventions
+  | 'send_payment_link'
+  | 'retry_checkout_session'
+  // Receivable interventions
+  | 'send_followup'
+  | 'promise_to_pay'
+  | 'account_manager_escalation';
 
 export type ActorType = 'Reclaim Agent' | 'System' | 'Human (Admin)' | 'Customer';
+
+// ─── Core Domain Interfaces ──────────────────────────────────────────────────
 
 export interface Customer {
   id: string;
@@ -62,6 +85,7 @@ export interface Payment {
   createdAt: string;
   updatedAt: string;
   metadata?: Record<string, any>;
+  idempotencyKey?: string;
 }
 
 export interface DecisionRationaleItem {
@@ -69,6 +93,54 @@ export interface DecisionRationaleItem {
   passed: boolean;
   type: 'history' | 'guardrail' | 'risk' | 'timing' | 'value';
 }
+
+// ─── Expected Recovery Value ─────────────────────────────────────────────────
+
+export interface RecoveryOption {
+  intervention: InterventionType;
+  label: string;
+  probability: number; // 0-100
+  expectedValue: number; // probability × amount
+  rationale: string;
+}
+
+// ─── Learning from Outcomes (Phase 5) ────────────────────────────────────────
+
+export interface LearningSignal {
+  sampleSize: number;
+  historicalRate: number;
+  explanation: string;
+  timingPreference?: string;
+  confidence: number; // 0-100
+}
+
+export interface LearningInsight {
+  id: string;
+  title: string;
+  description: string;
+  metric: string;
+  sampleSize: number;
+  confidence: number;
+  category: 'timing' | 'channel' | 'segment';
+}
+
+export interface RecoveryOutcome {
+  id: string;
+  caseId: string;
+  intervention: InterventionType;
+  failureReason: FailureReason;
+  customerSegment: 'Enterprise' | 'Mid-Market' | 'SMB' | 'Startup';
+  amount: number;
+  timing: 'morning' | 'afternoon' | 'evening';
+  actionTimestamp: string;
+  outcome: 'recovered' | 'failed' | 'expired' | 'escalated' | 'stopped';
+  recoveredAmount: number;
+  timeToRecoveryHours: number;
+  attemptCount: number;
+  escalated: boolean;
+}
+
+// ─── Agent Decision ──────────────────────────────────────────────────────────
 
 export interface AgentDecision {
   id: string;
@@ -84,6 +156,9 @@ export interface AgentDecision {
   executedAt?: string;
   outcome?: string;
   recoveredAmount?: number;
+  expectedRecoveryValue?: number;
+  recoveryOptions?: RecoveryOption[];
+  learningSignal?: LearningSignal;
 }
 
 export interface TimelineStep {
@@ -97,6 +172,57 @@ export interface TimelineStep {
   status: 'completed' | 'in_progress' | 'pending' | 'failed';
   state: AgentState;
 }
+
+// ─── Promise-to-Pay (Receivables - Phase 4) ──────────────────────────────────
+
+export interface PromiseToPay {
+  id?: string;
+  caseId?: string;
+  customerId?: string;
+  invoiceId?: string;
+  amount: number;
+  promisedDate: string;
+  status: 'pending' | 'promised' | 'fulfilled' | 'overdue' | 'broken' | 'cancelled';
+  source?: 'customer_portal' | 'whatsapp' | 'email' | 'account_manager' | 'reclaim_agent';
+  notes?: string;
+  createdAt: string;
+  verifiedAt?: string;
+}
+
+// ─── Checkout Details ────────────────────────────────────────────────────────
+
+export interface CheckoutDetails {
+  abandonmentPoint: string;
+  sessionId: string;
+  cartValue?: number;
+  timeSpentSeconds?: number;
+}
+
+// ─── Receivable Details ──────────────────────────────────────────────────────
+
+export interface ReceivableDetails {
+  invoiceId: string;
+  daysOverdue: number;
+  invoiceDate?: string;
+  dueDate?: string;
+  promiseToPay?: PromiseToPay;
+}
+
+// ─── Policy Gate ─────────────────────────────────────────────────────────────
+
+export interface PolicyCheck {
+  name: string;
+  passed: boolean;
+  detail: string;
+}
+
+export interface PolicyGateResult {
+  approved: boolean;
+  checks: PolicyCheck[];
+  blockReason?: string;
+}
+
+// ─── Unified Recovery Case ───────────────────────────────────────────────────
 
 export interface RecoveryCase {
   id: string;
@@ -127,8 +253,17 @@ export interface RecoveryCase {
     quietHoursPassed: boolean;
     recoveryWindowPassed: boolean;
     highValueApprovalRequired: boolean;
+    idempotencyPassed?: boolean;
+    actionEligibilityPassed?: boolean;
   };
+  // Multi-surface fields
+  revenueType: RevenueType;
+  eventId?: string; // Idempotency key for duplicate detection
+  checkoutDetails?: CheckoutDetails;
+  receivableDetails?: ReceivableDetails;
 }
+
+// ─── Guardrails Configuration ────────────────────────────────────────────────
 
 export interface Guardrails {
   maxRetries: number;
@@ -144,6 +279,8 @@ export interface Guardrails {
   autoExecuteHighConfidence: boolean;
   confidenceThreshold: number; // e.g. 75%
 }
+
+// ─── KPI and Dashboard Types ─────────────────────────────────────────────────
 
 export interface RecoveryKPIData {
   revenueAtRisk: number;
@@ -187,4 +324,51 @@ export interface IntegrationSource {
   eventsCount: number;
   lastSync: string;
   iconName: string;
+}
+
+// ─── Recovery Lab / Benchmark Types ──────────────────────────────────────────
+
+export interface SimulationConfig {
+  totalCases: number;
+  scenarioMix: {
+    payments: number; // 0-100 percentage
+    checkout: number;
+    receivables: number;
+  };
+  seed?: number;
+}
+
+export interface StrategyResult {
+  strategyName: string;
+  totalCases: number;
+  revenueAtRisk: number;
+  recoveredRevenue: number;
+  recoveryRate: number;
+  avgAttempts: number;
+  avgTimeToRecoveryHours: number;
+  escalationRate: number;
+  policyViolations: number;
+  stopRuleCompliance: number;
+  unnecessaryActions: number;
+  failedActions: number;
+}
+
+export interface ScenarioBreakdown {
+  scenarioType: RevenueType;
+  label: string;
+  cases: number;
+  revenueAtRisk: number;
+  recovered: number;
+  recoveryRate: number;
+  bestIntervention: string;
+}
+
+export interface BenchmarkResults {
+  config: SimulationConfig;
+  naiveRetry: StrategyResult;
+  staticRules: StrategyResult;
+  reclaimAgent: StrategyResult;
+  adaptiveReclaim?: StrategyResult;
+  scenarioBreakdowns: ScenarioBreakdown[];
+  generatedAt: string;
 }

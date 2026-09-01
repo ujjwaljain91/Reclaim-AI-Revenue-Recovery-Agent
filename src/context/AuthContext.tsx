@@ -40,7 +40,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const STORAGE_KEY = 'reclaim_auth_user';
-const USERS_DB_KEY = 'reclaim_users_database';
+
 
 // Seed default accounts
 const DEFAULT_DEMO_USER: User = {
@@ -57,42 +57,15 @@ const DEFAULT_DEMO_USER: User = {
   connectedIntegrations: ['razorpay_sandbox', 'reclaim_billing', 'business_bank', 'email', 'whatsapp'],
 };
 
-// In-memory cache synced with localStorage
+// In-memory users database (resets on page refresh — no backend persistence)
+const usersDatabase = new Map<string, { user: User; password: string }>();
+usersDatabase.set('demo@reclaim.ai', {
+  user: DEFAULT_DEMO_USER,
+  password: 'Reclaim@2026',
+});
+
 function getUsersDatabase(): Map<string, { user: User; password: string }> {
-  const map = new Map<string, { user: User; password: string }>();
-  map.set('demo@reclaim.ai', {
-    user: DEFAULT_DEMO_USER,
-    password: 'Reclaim@2026',
-  });
-
-  if (typeof window !== 'undefined') {
-    try {
-      const stored = localStorage.getItem(USERS_DB_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored) as Record<string, { user: User; password: string }>;
-        Object.entries(parsed).forEach(([k, v]) => {
-          map.set(k.toLowerCase().trim(), v);
-        });
-      }
-    } catch {
-      // ignore JSON parse errors
-    }
-  }
-  return map;
-}
-
-function saveUsersDatabase(map: Map<string, { user: User; password: string }>) {
-  if (typeof window !== 'undefined') {
-    try {
-      const obj: Record<string, { user: User; password: string }> = {};
-      map.forEach((v, k) => {
-        obj[k] = v;
-      });
-      localStorage.setItem(USERS_DB_KEY, JSON.stringify(obj));
-    } catch {
-      // ignore
-    }
-  }
+  return usersDatabase;
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -103,6 +76,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Hydrate session from localStorage on mount
   useEffect(() => {
     try {
+      // Clean up stale users database from localStorage (no backend persistence)
+      localStorage.removeItem('reclaim_users_database');
+
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored) as User;
@@ -171,7 +147,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       };
 
       db.set(key, { user: newUser, password });
-      saveUsersDatabase(db);
+
 
       setUser(newUser);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(newUser));
@@ -214,7 +190,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (entry) {
           entry.user = updated;
           db.set(updated.email.toLowerCase().trim(), entry);
-          saveUsersDatabase(db);
+
         }
 
         return updated;
